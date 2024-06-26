@@ -4,6 +4,7 @@ from models import db
 from flask_migrate import Migrate
 from users.routes import users_bp
 from echo.routes import echo_bp
+from map.routes import map_bp
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -13,6 +14,7 @@ migrate = Migrate(app, db)
 
 app.register_blueprint(users_bp)
 app.register_blueprint(echo_bp)
+app.register_blueprint(map_bp)
 
 
 @app.cli.command("reset-db")

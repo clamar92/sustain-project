@@ -24,3 +24,12 @@ class User(db.Model):
             return True
         else:
             return False
+        
+
+class Cell(db.Model):
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    top_left_lon = db.Column(db.Float, nullable=False)
+    top_left_lat = db.Column(db.Float, nullable=False)
+    bottom_right_lon = db.Column(db.Float, nullable=False)
+    bottom_right_lat = db.Column(db.Float, nullable=False)
+    valore = db.Column(db.Integer, default=0, nullable=False)
