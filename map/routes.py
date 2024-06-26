@@ -6,12 +6,20 @@ import geopandas as gpd
 from shapely.geometry import box
 import numpy as np
 import random
-from flask import Flask, request, Response, Blueprint
+from flask import request, Response, Blueprint, jsonify
 import io
+from models import db, Cell
+import requests
 
 
 
 map_bp = Blueprint('map', __name__, url_prefix='/map')
+
+
+
+################################################################
+########################### SPLIT MAP ##########################
+################################################################
 
 
 # Impostazioni di OSMnx
@@ -42,6 +50,7 @@ def area_of_intersection(rectangle, residential_union):
 def dividi_mappa():
     city = request.args.get('city', 'Cagliari, Italy')
     cell_size_meters = int(request.args.get('cell', 400))
+    save_variable = bool(request.args.get('save', 0))
 
     # Scarica le geometrie delle aree residenziali
     tags = {'landuse': 'residential'}
@@ -69,6 +78,23 @@ def dividi_mappa():
 
     fig, ax = plt.subplots(figsize=(10, 10))
 
+
+    # Save valid rectangles to the database
+    if save_variable:
+        for _, row in grid.iterrows():
+            rectangle = row.geometry
+            minx, miny, maxx, maxy = rectangle.bounds
+            new_rectangle = Cell(
+                top_left_lon=minx,
+                top_left_lat=maxy,
+                bottom_right_lon=maxx,
+                bottom_right_lat=miny,
+                valore=0
+            )
+            db.session.add(new_rectangle)
+        db.session.commit()
+
+
     # Traccia le aree residenziali
     residential_areas.boundary.plot(ax=ax, color="blue")
 
@@ -94,7 +120,7 @@ def dividi_mappa():
 
     ax.set_xlabel('Longitudine')
     ax.set_ylabel('Latitudine')
-    ax.set_title(f'Contorni del centro abitato di {city} con griglia di rettangoli')
+    #ax.set_title(f'Divisione centro abitato di {city} con griglia')
 
     # Salva la figura in un buffer
     buf = io.BytesIO()
@@ -104,3 +130,81 @@ def dividi_mappa():
 
     return Response(buf.getvalue(), mimetype='image/png')
 
+
+
+################################################################
+############################ GET CELL ##########################
+################################################################
+
+@map_bp.route('/getAllCells', methods=['GET'])
+def get_all_cells():
+    try:
+        # Query the database for all Rectangle entries
+        rectangles = Cell.query.all()
+        
+        # Serialize the data
+        cells_data = []
+        for rect in rectangles:
+            cells_data.append({
+                'id': rect.id,
+                'top_left_lon': rect.top_left_lon,
+                'top_left_lat': rect.top_left_lat,
+                'bottom_right_lon': rect.bottom_right_lon,
+                'bottom_right_lat': rect.bottom_right_lat,
+                'valore': rect.valore
+            })
+        
+        return jsonify(cells_data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+
+
+################################################################
+########################## GET CHALLENGE #######################
+################################################################
+
+# Function to get the address from coordinates
+def get_address_from_coordinates(lat, lon):
+    url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&addressdetails=1"
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        address = data.get('address', {})
+        road = address.get('road', 'Unknown road')
+        house_number = address.get('house_number', 'No number')
+        return f"{road}, {house_number}"
+    else:
+        return "Address not found"
+
+
+@map_bp.route('/getChallenges', methods=['GET'])
+def get_challenges():
+    try:
+        # Query the database for all Rectangle entries
+        rectangles = Cell.query.all()
+        
+        # Select 4 random rectangles
+        if len(rectangles) < 4:
+            return jsonify({"error": "Not enough rectangles in the database"}), 500
+        
+        selected_rectangles = random.sample(rectangles, 4)
+        
+        challenges_data = []
+        for rect in selected_rectangles:
+            center_lat = (rect.top_left_lat + rect.bottom_right_lat) / 2
+            center_lon = (rect.top_left_lon + rect.bottom_right_lon) / 2
+            address = get_address_from_coordinates(center_lat, center_lon)
+            challenges_data.append({
+                'id': rect.id,
+                'top_left_lon': rect.top_left_lon,
+                'top_left_lat': rect.top_left_lat,
+                'bottom_right_lon': rect.bottom_right_lon,
+                'bottom_right_lat': rect.bottom_right_lat,
+                'valore': rect.valore,
+                'address': address
+            })
+        
+        return jsonify(challenges_data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
