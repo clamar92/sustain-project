@@ -1,9 +1,10 @@
 # users/routes.py
-from flask import Blueprint, request, jsonify, current_app, send_from_directory, url_for
+from flask import Blueprint, request, jsonify, current_app, send_from_directory, url_for, session
 from models import db, User
 from google.oauth2 import id_token
 from google.auth.transport import requests
 import os
+from decorators import login_required  # Importa il decoratore
 
 
 WEB_CLIENT_ID = "813739084992-fqmluqgaip3tq8t9fdtptu3c8cdetala.apps.googleusercontent.com"
@@ -21,9 +22,22 @@ def registration():
     email = data.get('email')
     password = data.get('hashedPassword')
     salt = data.get('salt')
-    google_user = data.get('google_user', False)  # Default a False se non specificato
+    google_user = False
     punteggio = data.get('points', 0)
     url_icon = data.get('profilePictureURI')
+
+    # check icona
+    try:
+        nome_file = os.path.basename(url_icon)
+        cartella_icone = "static/icons"
+        percorso_completo = os.path.join(cartella_icone, nome_file)
+        if os.path.exists(percorso_completo):
+            pass
+        else:
+            return jsonify({"message": "Icon does not exist."}), 400
+    except:
+        return jsonify({"message": "Icon does not exist."}), 400
+
     nome = data.get('name')
     cognome = data.get('surname')
     username = data.get('username')
@@ -37,7 +51,8 @@ def registration():
     # Crea un nuovo utente
     new_user = User(email=email, password_hash=password, salt=salt,
                     google_user=google_user, punteggio=punteggio, url_icon=url_icon,
-                    nome=nome, cognome=cognome, username=username, phone_number=phone_number)
+                    nome=nome, cognome=cognome, username=username, phone_number=phone_number, 
+                    icon_type = 1)
     db.session.add(new_user)
     db.session.commit()
 
@@ -55,6 +70,7 @@ def registration():
     }
 
     return jsonify(user_data), 200
+
 
 
 
@@ -99,6 +115,12 @@ def login():
     # Controlla la password
     if not user.check_password(hashedPassword):
         return jsonify({"message": "Invalid username or password"}), 401
+    
+
+    # Se l'autenticazione ha successo, memorizza le informazioni di sessione
+    session['user_id'] = user.id
+    session['username'] = user.username
+
 
     # Se l'autenticazione ha successo, prepara la risposta JSON con tutti i campi dell'utente
     user_data = {
@@ -143,6 +165,10 @@ def validate_user():
                 # Aggiorna il campo url_icon con la nuova immagine
                 existing_user.url_icon = picture
                 db.session.commit()
+
+                # aggiungi sessione
+                session['user_id'] = existing_user.id
+                session['username'] = existing_user.username
     
                 user_data = {
                     "email": existing_user.email,
@@ -169,10 +195,14 @@ def validate_user():
             nome=given_name,
             cognome=family_name,
             username=username,
-            phone_number=''
+            phone_number='',
+            icon_type = 0
         )
         db.session.add(new_user)
         db.session.commit()
+
+        session['user_id'] = new_user.id
+        session['username'] = new_user.username
 
         user_data = {
                     "email": email,
@@ -201,6 +231,7 @@ def validate_user():
 ########################## USERS LIST ##########################
 ################################################################
 @users_bp.route('/getUsersList', methods=['GET'])
+@login_required  # Proteggi questa route
 def getUsersList():
     users = User.query.all()
 
@@ -228,6 +259,7 @@ def getUsersList():
 ########################## USERS ICONS #########################
 ################################################################
 @users_bp.route('/icons', methods=['GET'])
+@login_required  # Proteggi questa route
 def get_icons():
     # Directory delle icone
     icons_dir = os.path.join(current_app.static_folder, 'icons')
@@ -244,3 +276,107 @@ def get_icons():
 @users_bp.route('/icons/<filename>', methods=['GET'])
 def serve_icon(filename):
     return send_from_directory(os.path.join(current_app.static_folder, 'icons'), filename)
+
+
+
+
+
+
+################################################################
+############################# LOGOUT ###########################
+################################################################
+@users_bp.route('/logout', methods=['GET'])
+@login_required  # Proteggi questa route
+def logout():
+    session.pop('user_id', None)
+    session.pop('username', None)
+    return jsonify({"message": "Logout successful!"}), 200
+
+
+
+
+
+
+################################################################
+########################## CHECK LOGIN #########################
+################################################################
+@users_bp.route('/checkLogin', methods=['GET'])
+@login_required  # Proteggi questa route
+def checkLogin():
+    if 'user_id' in session:
+        user_id = session['user_id']
+        username = session['username']
+        existing_user = User.query.filter((User.id == user_id) | (User.username == username)).first()
+        if existing_user:
+                user_data = {
+                    "email": existing_user.email,
+                    "points": existing_user.punteggio,
+                    "profilePictureURI": existing_user.url_icon,
+                    "name": existing_user.nome,
+                    "surname": existing_user.cognome,
+                    "username": existing_user.username,
+                    "phoneNumber": existing_user.phone_number,
+                    "hashedPassword": "",
+                    "salt": ""
+                }
+
+                return jsonify(user_data), 200
+        else:
+            return jsonify({"message": "User not found"}), 401
+    else:
+        return jsonify({"message": "User not found"}), 401
+    
+
+
+
+
+
+################################################################
+####################### CHANGE USER ICON #######################
+################################################################
+@users_bp.route('/changeIcon', methods=['POST'])
+@login_required  # Proteggi questa route
+def changeIcon():
+    data = request.get_json()
+    url_icon = data.get('profilePictureURI')
+
+    # check icona
+    try:
+        nome_file = os.path.basename(url_icon)
+        cartella_icone = "static/icons"
+        percorso_completo = os.path.join(cartella_icone, nome_file)
+        if os.path.exists(percorso_completo):
+            pass
+        else:
+            return jsonify({"message": "Icon does not exist."}), 400
+    except:
+        return jsonify({"message": "Icon does not exist."}), 400
+    
+
+    if 'user_id' in session:
+        user_id = session['user_id']
+        username = session['username']
+        existing_user = User.query.filter((User.id == user_id) | (User.username == username)).first()
+        if existing_user:
+                
+                # Aggiorna il campo url_icon con la nuova immagine
+                existing_user.url_icon = url_icon
+                db.session.commit()
+
+                user_data = {
+                    "email": existing_user.email,
+                    "points": existing_user.punteggio,
+                    "profilePictureURI": existing_user.url_icon,
+                    "name": existing_user.nome,
+                    "surname": existing_user.cognome,
+                    "username": existing_user.username,
+                    "phoneNumber": existing_user.phone_number,
+                    "hashedPassword": "",
+                    "salt": ""
+                }
+
+                return jsonify(user_data), 200
+        else:
+            return jsonify({"message": "User not found"}), 401
+    else:
+        return jsonify({"message": "User not found"}), 401

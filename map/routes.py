@@ -10,21 +10,21 @@ from flask import request, Response, Blueprint, jsonify
 import io
 from models import db, Cell
 import requests
-
-
+from geopy.geocoders import OpenCage
 
 map_bp = Blueprint('map', __name__, url_prefix='/map')
-
 
 
 ################################################################
 ########################### SPLIT MAP ##########################
 ################################################################
 
-
 # Impostazioni di OSMnx
 ox.settings.log_console = True
 ox.settings.use_cache = True
+
+# Inizializza il geocoder OpenCage
+geolocator = OpenCage(api_key='542212d332054c58b252c81c50a6c2d1')  # Sostituisci con la tua chiave API OpenCage
 
 # Funzione per calcolare la lunghezza di un grado di longitudine alla latitudine specifica
 def meters_to_degrees(meters, lat):
@@ -46,10 +46,21 @@ def area_of_intersection(rectangle, residential_union):
     intersection = rectangle.intersection(residential_union)
     return intersection.area / rectangle.area
 
+def format_address(location):
+    components = location.raw.get('components', {})
+    house_number = components.get('house_number', '')
+    road = components.get('road', '')
+    #city = components.get('city', '')
+    #state = components.get('state', '')
+    #country = components.get('country', '')
+    #return f"{house_number} {road}, {city}, {state}, {country}".strip(', ')
+    return f"{house_number} {road}, Cagliari, Italy".strip(', ')
+
+
 @map_bp.route('/dividiMappa', methods=['GET'])
 def dividi_mappa():
     city = request.args.get('city', 'Cagliari, Italy')
-    cell_size_meters = int(request.args.get('cell', 400))
+    cell_size_meters = int(request.args.get('cell', 300))
     save_variable = bool(request.args.get('save', 0))
 
     # Scarica le geometrie delle aree residenziali
@@ -74,36 +85,43 @@ def dividi_mappa():
     # Filtra i rettangoli che hanno almeno il 20% dell'area in zone residenziali
     residential_union = residential_areas.unary_union
     grid['intersection_area_ratio'] = grid.geometry.apply(lambda x: area_of_intersection(x, residential_union))
-    grid = grid[grid['intersection_area_ratio'] >= 0.2]
+    grid = grid[grid['intersection_area_ratio'] >= 0.7]
 
     fig, ax = plt.subplots(figsize=(10, 10))
 
-
     # Save valid rectangles to the database
     if save_variable:
+        # Cancella tutti i campi della tabella Cell
+        db.session.query(Cell).delete()
+        db.session.commit()
+
         for _, row in grid.iterrows():
             rectangle = row.geometry
             minx, miny, maxx, maxy = rectangle.bounds
-            new_rectangle = Cell(
-                top_left_lon=minx,
-                top_left_lat=maxy,
-                bottom_right_lon=maxx,
-                bottom_right_lat=miny,
-                valore=0
-            )
-            db.session.add(new_rectangle)
-        db.session.commit()
+            center = rectangle.centroid
 
+            try:
+                location = geolocator.reverse((center.y, center.x), language='en')
+                address = format_address(location) if location and location.address else 'Unknown'
+            except Exception as e:
+                address = 'Unknown'
+                print(f"Geocoding error: {e}")
+
+
+            if address != 'Unknown':
+                new_rectangle = Cell(
+                    top_left_lon=minx,
+                    top_left_lat=maxy,
+                    bottom_right_lon=maxx,
+                    bottom_right_lat=miny,
+                    air_quality=0,
+                    address=address
+                )
+                db.session.add(new_rectangle)
+        db.session.commit()
 
     # Traccia le aree residenziali
     residential_areas.boundary.plot(ax=ax, color="blue")
-
-    # Colori casuali con trasparenza
-    #colors = ['green', 'red', 'yellow']
-    #for geom in grid.geometry:
-    #    color = random.choice(colors)
-    #    x, y = geom.exterior.xy
-    #    ax.fill(x, y, color=color, alpha=0.5)  # alpha per la trasparenza
 
     # Traccia i bordi dei rettangoli della griglia
     grid.boundary.plot(ax=ax, edgecolor='red')
@@ -120,7 +138,6 @@ def dividi_mappa():
 
     ax.set_xlabel('Longitudine')
     ax.set_ylabel('Latitudine')
-    #ax.set_title(f'Divisione centro abitato di {city} con griglia')
 
     # Salva la figura in un buffer
     buf = io.BytesIO()
@@ -129,6 +146,7 @@ def dividi_mappa():
     plt.close(fig)
 
     return Response(buf.getvalue(), mimetype='image/png')
+
 
 
 
@@ -145,66 +163,75 @@ def get_all_cells():
         # Serialize the data
         cells_data = []
         for rect in rectangles:
+            air_quality_status = 'LOW' if rect.air_quality == 0 else 'MEDIUM' if rect.air_quality == 1 else 'HIGH'
+            
             cells_data.append({
-                'id': rect.id,
-                'top_left_lon': rect.top_left_lon,
-                'top_left_lat': rect.top_left_lat,
-                'bottom_right_lon': rect.bottom_right_lon,
-                'bottom_right_lat': rect.bottom_right_lat,
-                'valore': rect.valore
+                'topLeft': {
+                    'latitude': rect.top_left_lat,
+                    'longitude': rect.top_left_lon
+                },
+                'bottomRight': {
+                    'latitude': rect.bottom_right_lat,
+                    'longitude': rect.bottom_right_lon
+                },
+                'air_quality': air_quality_status
             })
         
         return jsonify(cells_data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
     
 
 
 ################################################################
 ########################## GET CHALLENGE #######################
 ################################################################
-
-# Function to get the address from coordinates
-def get_address_from_coordinates(lat, lon):
-    url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&addressdetails=1"
-    response = requests.get(url)
-    if response.status_code == 200:
-        data = response.json()
-        address = data.get('address', {})
-        road = address.get('road', 'Unknown road')
-        house_number = address.get('house_number', 'No number')
-        return f"{road}, {house_number}"
-    else:
-        return "Address not found"
-
-
 @map_bp.route('/getChallenges', methods=['GET'])
 def get_challenges():
     try:
-        # Query the database for all Rectangle entries
+        # Query the database for all Cell entries
         rectangles = Cell.query.all()
         
-        # Select 4 random rectangles
+        # Controlla se ci sono almeno 4 rettangoli nel database
         if len(rectangles) < 4:
             return jsonify({"error": "Not enough rectangles in the database"}), 500
         
+        # Seleziona 4 rettangoli casuali
         selected_rectangles = random.sample(rectangles, 4)
         
         challenges_data = []
         for rect in selected_rectangles:
-            center_lat = (rect.top_left_lat + rect.bottom_right_lat) / 2
-            center_lon = (rect.top_left_lon + rect.bottom_right_lon) / 2
-            address = get_address_from_coordinates(center_lat, center_lon)
+            air_quality_status = 'LOW' if rect.air_quality == 0 else 'MEDIUM' if rect.air_quality == 1 else 'HIGH'
+
+            # Genera un numero casuale di punti da 100 a 500
+            points = random.randint(50, 100)
+
+            # Utilizza le coordinate del centro del rettangolo come "waypoint"
+            waypoint_latitude = (rect.top_left_lat + rect.bottom_right_lat) / 2
+            waypoint_longitude = (rect.top_left_lon + rect.bottom_right_lon) / 2
+
             challenges_data.append({
-                'id': rect.id,
-                'top_left_lon': rect.top_left_lon,
-                'top_left_lat': rect.top_left_lat,
-                'bottom_right_lon': rect.bottom_right_lon,
-                'bottom_right_lat': rect.bottom_right_lat,
-                'valore': rect.valore,
-                'address': address
+                'cell': {
+                    'topLeft': {
+                        'latitude': rect.top_left_lat,
+                        'longitude': rect.top_left_lon
+                    },
+                    'bottomRight': {
+                        'latitude': rect.bottom_right_lat,
+                        'longitude': rect.bottom_right_lon
+                    },
+                    'air_quality': air_quality_status
+                },
+                'points': points,
+                'waypoint': {
+                    'latitude': waypoint_latitude,
+                    'longitude': waypoint_longitude
+                },
+                'address': rect.address
             })
         
         return jsonify(challenges_data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+

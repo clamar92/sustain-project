@@ -7,6 +7,7 @@ from echo.routes import echo_bp
 from map.routes import map_bp
 
 app = Flask(__name__)
+app.secret_key = 'akjakjHJGFG54655!ygjknkl_iqiqwwee64w4w5e32c'
 app.config.from_object(Config)
 
 db.init_app(app)

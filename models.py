@@ -15,6 +15,7 @@ class User(db.Model):
     cognome = db.Column(db.String(50))  # Nuovo campo stringa per cognome
     username = db.Column(db.String(50))  # Nuovo campo stringa per username
     phone_number = db.Column(db.String(20), default='')  # Nuovo campo stringa per numero
+    icon_type = db.Column(db.Integer, default=0)  # 0 Google icon - 1 Avatar icon - 2 user icon
 
 
     def check_password(self, hashedPassword):
@@ -32,4 +33,5 @@ class Cell(db.Model):
     top_left_lat = db.Column(db.Float, nullable=False)
     bottom_right_lon = db.Column(db.Float, nullable=False)
     bottom_right_lat = db.Column(db.Float, nullable=False)
-    valore = db.Column(db.Integer, default=0, nullable=False)
+    address = db.Column(db.String(400), default='')
+    air_quality = db.Column(db.Integer, default=0, nullable=False)
