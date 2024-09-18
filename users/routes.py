@@ -337,19 +337,18 @@ def checkLogin():
 @users_bp.route('/changeIcon', methods=['POST'])
 @login_required  # Proteggi questa route
 def changeIcon():
-    data = request.get_json()
-    url_icon = data.get('profilePictureURI')
+    url_icon = request.data.decode('utf-8')
 
-    # check icona
-    try:
-        nome_file = os.path.basename(url_icon)
-        cartella_icone = "static/icons"
-        percorso_completo = os.path.join(cartella_icone, nome_file)
-        if os.path.exists(percorso_completo):
-            pass
-        else:
-            return jsonify({"message": "Icon does not exist."}), 400
-    except:
+    # Directory delle icone
+    icons_dir = os.path.join(current_app.static_folder, 'icons')
+    # Ottieni l'elenco dei file di icone
+    icons = [f for f in os.listdir(icons_dir) if os.path.isfile(os.path.join(icons_dir, f))]
+    # Crea i link per accedere alle icone
+    icon_links = [url_for('static', filename=f'icons/{icon}', _external=True) for icon in icons]
+    # Verifica se url_icon è presente in icon_links
+    if url_icon in icon_links:
+        pass
+    else:
         return jsonify({"message": "Icon does not exist."}), 400
     
 

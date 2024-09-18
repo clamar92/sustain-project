@@ -163,7 +163,10 @@ def get_all_cells():
         # Serialize the data
         cells_data = []
         for rect in rectangles:
-            air_quality_status = 'LOW' if rect.air_quality == 0 else 'MEDIUM' if rect.air_quality == 1 else 'HIGH'
+            #air_quality_status = 'LOW' if rect.air_quality == 0 else 'MEDIUM' if rect.air_quality == 1 else 'HIGH'
+            # simulazione valore air quality
+            airquality = random.randint(0, 2)
+            air_quality_status = 'LOW' if airquality == 0 else 'MEDIUM' if airquality == 1 else 'HIGH'
             
             cells_data.append({
                 'topLeft': {
@@ -191,18 +194,34 @@ def get_all_cells():
 def get_challenges():
     try:
         # Query the database for all Cell entries
-        rectangles = Cell.query.all()
+        #rectangles = Cell.query.all()
         
         # Controlla se ci sono almeno 4 rettangoli nel database
-        if len(rectangles) < 4:
-            return jsonify({"error": "Not enough rectangles in the database"}), 500
+        #if len(rectangles) < 4:
+        #    return jsonify({"error": "Not enough rectangles in the database"}), 500
         
         # Seleziona 4 rettangoli casuali
-        selected_rectangles = random.sample(rectangles, 4)
+        #selected_rectangles = random.sample(rectangles, 4)
+
+        # Query the database for the specific Cell entries
+        rectangles = Cell.query.filter(Cell.id.in_([884, 893, 899, 906])).all()
+
+        # Controlla se ci sono esattamente 4 rettangoli nel database
+        if len(rectangles) != 4:
+            return jsonify({"error": "The required rectangles are not available in the database"}), 500
+
+        # Seleziona i rettangoli specificati
+        selected_rectangles = rectangles
+
         
         challenges_data = []
         for rect in selected_rectangles:
-            air_quality_status = 'LOW' if rect.air_quality == 0 else 'MEDIUM' if rect.air_quality == 1 else 'HIGH'
+
+            # simulazione valore air quality
+            airquality = random.randint(0, 2)
+            air_quality_status = 'LOW' if airquality == 0 else 'MEDIUM' if airquality == 1 else 'HIGH'
+
+            #air_quality_status = 'LOW' if rect.air_quality == 0 else 'MEDIUM' if rect.air_quality == 1 else 'HIGH'
 
             # Genera un numero casuale di punti da 100 a 500
             points = random.randint(50, 100)
