@@ -35,3 +35,24 @@ class Cell(db.Model):
     bottom_right_lat = db.Column(db.Float, nullable=False)
     address = db.Column(db.String(400), default='')
     air_quality = db.Column(db.Integer, default=0, nullable=False)
+
+
+class EnvironmentalData(db.Model):
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # Relazione con la tabella User
+    battery_capacity = db.Column(db.Integer, nullable=False)  # Capacità residua della batteria (%)
+    battery_lifetime = db.Column(db.Integer, nullable=False)  # Durata residua della batteria (minuti)
+    temperature = db.Column(db.Float, nullable=False)  # Temperatura ambientale (°C)
+    humidity = db.Column(db.Integer, nullable=False)  # Umidità ambientale (%RH)
+    co2_scd41 = db.Column(db.Integer, nullable=False)  # CO2 ambientale (SCD41, ppm)
+    co2_stc31c = db.Column(db.Integer, nullable=False)  # CO2 ambientale (STC31-C, vol%)
+    voc = db.Column(db.Integer, nullable=False)  # VOC ambientale (ppm)
+    pm1_0 = db.Column(db.Integer, nullable=False)  # PM1.0 (μg/m³)
+    pm2_5 = db.Column(db.Integer, nullable=False)  # PM2.5 (μg/m³)
+    pm4_0 = db.Column(db.Integer, nullable=False)  # PM4.0 (μg/m³)
+    pm10 = db.Column(db.Integer, nullable=False)  # PM10 (μg/m³)
+    timestamp = db.Column(db.DateTime, nullable=False, default=db.func.now())  # Data e ora di raccolta del dato
+    
+    # Relazione con la tabella User
+    user = db.relationship('User', backref=db.backref('environmental_data', lazy=True))
+

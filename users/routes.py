@@ -1,6 +1,6 @@
 # users/routes.py
 from flask import Blueprint, request, jsonify, current_app, send_from_directory, url_for, session
-from models import db, User
+from models import db, User, EnvironmentalData
 from google.oauth2 import id_token
 from google.auth.transport import requests
 import os
@@ -379,3 +379,85 @@ def changeIcon():
             return jsonify({"message": "User not found"}), 401
     else:
         return jsonify({"message": "User not found"}), 401
+    
+
+
+
+
+
+################################################################
+######################### SEND DATA AIR ########################
+################################################################
+@users_bp.route('/sendNFCData', methods=['POST'])
+#@login_required  # Proteggi la route con il login
+def sendNFCData():
+    data = request.get_json()  # Otteniamo i dati JSON dal corpo della richiesta
+    
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+
+    # Recuperiamo l'utente dalla sessione
+    if 'user_id' in session:
+    #if True == True:
+        user_id = session['user_id']
+        username = session['username']
+        #user_id = 10
+        #username = "claudioverdi"
+
+        existing_user = User.query.filter((User.id == user_id) | (User.username == username)).first()
+
+        if not existing_user:
+            return jsonify({"error": "User not found"}), 404
+
+
+        try:
+            # Iteriamo attraverso i record, che sono stringhe come: "[[[98#500#26.0#60#400#50#350#0#0#10#567]]]"
+            for record in data:
+                # Rimuoviamo le triple parentesi quadre all'inizio e alla fine della stringa
+                cleaned_record = record.strip('[]')
+                # Dividiamo i valori della stringa usando il simbolo '#'
+                values = cleaned_record.split('#')
+
+                # Convertiamo i valori nella forma corretta
+                battery_capacity = int(values[0])
+                battery_lifetime = int(values[1])
+                temperature = float(values[2])
+                humidity = int(values[3])
+                co2_scd41 = int(values[4])
+                co2_stc31c = int(values[5])
+                voc = int(values[6])
+                pm1_0 = int(values[7])
+                pm2_5 = int(values[8])
+                pm4_0 = int(values[9])
+                pm10 = int(values[10])
+
+                # Creiamo un nuovo oggetto EnvironmentalData
+                environmental_data = EnvironmentalData(
+                    user_id=user_id,
+                    battery_capacity=battery_capacity,
+                    battery_lifetime=battery_lifetime,
+                    temperature=temperature,
+                    humidity=humidity,
+                    co2_scd41=co2_scd41,
+                    co2_stc31c=co2_stc31c,
+                    voc=voc,
+                    pm1_0=pm1_0,
+                    pm2_5=pm2_5,
+                    pm4_0=pm4_0,
+                    pm10=pm10
+                )
+
+                # Aggiungiamo l'oggetto al database
+                db.session.add(environmental_data)
+
+            # Commit per salvare tutti i record
+            db.session.commit()
+            return jsonify({"message": "Data saved successfully"}), 200
+
+        except Exception as e:
+            db.session.rollback()  # Effettuiamo un rollback in caso di errore
+            return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+
+    else:
+        return jsonify({"error": "User not logged in"}), 401
