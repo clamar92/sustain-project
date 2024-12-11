@@ -15,5 +15,5 @@ def echo(subpath=''):
             data = request.form  # Per form data
     else:
         data = None
-    return data
+    return data or {}  # Restituisce un JSON vuoto se `data` è None
 
