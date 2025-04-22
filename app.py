@@ -7,11 +7,27 @@ from echo.routes import echo_bp
 from map.routes import map_bp
 from flask_admin import Admin
 from flask_admin.contrib.sqla import ModelView
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
+
+#TODO AGGIUNGERE VERIFICA EMAIL
+#TODO AGIIUNGERE SESSIONE LIMITATA (DA REFRESH A LOGIN)
+#TODO 403 Forbidden - Oppure? - MAIL DOES NOT VERIFIED (FORBIDDEN)
+#TODO passare ad https con Let's encrypt
+
 
 
 app = Flask(__name__)
 app.secret_key = 'akjakjHJGFG54655!ygjknkl_iqiqwwee64w4w5e32c'
 app.config.from_object(Config)
+
+# Limiter: limita richieste per IP
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "100 per hour", "60 per minute"]
+)
 
 db.init_app(app)
 migrate = Migrate(app, db)
@@ -25,7 +41,7 @@ app.register_blueprint(map_bp)
 admin = Admin(app, name='My Admin', template_mode='bootstrap4')
 
 # Aggiunta delle viste dei modelli con endpoint unici
-#admin.add_view(ModelView(User, db.session, endpoint='admin_user'))
+admin.add_view(ModelView(User, db.session, endpoint='admin_user'))
 admin.add_view(ModelView(EnvironmentalData, db.session, endpoint='admin_environmental_data'))
 
 

@@ -13,28 +13,37 @@ WEB_CLIENT_ID = "813739084992-fqmluqgaip3tq8t9fdtptu3c8cdetala.apps.googleuserco
 users_bp = Blueprint('user', __name__, url_prefix='/user')
 
 
+ICON_URLS = [
+    "http://192.167.133.40:8080/user/icon/1",
+    "http://192.167.133.40:8080/user/icon/2",
+    "http://192.167.133.40:8080/user/icon/3",
+    "http://192.167.133.40:8080/user/icon/4",
+    "http://192.167.133.40:8080/user/icon/5",
+    "http://192.167.133.40:8080/user/icon/6",
+    "http://192.167.133.40:8080/user/icon/7"
+]
+
+
+
 ################################################################
 ########################## REGISTRATION ########################
 ################################################################
 @users_bp.route('/registration', methods=['POST'])
 def registration():
+
     data = request.get_json()
     email = data.get('email')
     password = data.get('hashedPassword')
     salt = data.get('salt')
     google_user = False
-    punteggio = data.get('points', 0)
+    punteggio = 0
     url_icon = data.get('profilePictureURI')
 
     # check icona
     try:
-        nome_file = os.path.basename(url_icon)
-        cartella_icone = "static/icons"
-        percorso_completo = os.path.join(cartella_icone, nome_file)
-        if os.path.exists(percorso_completo):
-            pass
-        else:
+        if url_icon not in ICON_URLS:
             return jsonify({"message": "Icon does not exist."}), 400
+    
     except:
         return jsonify({"message": "Icon does not exist."}), 400
 
@@ -238,13 +247,13 @@ def getUsersList():
     users_list = []
     for user in users:
         user_data = {
-            "email": user.email,
+            "email": "",
             "points": user.punteggio,
             "profilePictureURI": user.url_icon,
-            "name": user.nome,
-            "surname": user.cognome,
+            "name": "",
+            "surname": "",
             "username": user.username,
-            "phoneNumber": user.phone_number,
+            "phoneNumber": "",
             # Puoi aggiungere altri campi se necessario
         }
         users_list.append(user_data)
@@ -255,29 +264,34 @@ def getUsersList():
 
 
 
+
 ################################################################
 ########################## USERS ICONS #########################
 ################################################################
 @users_bp.route('/icons', methods=['GET'])
-@login_required  # Proteggi questa route
 def get_icons():
-    # Directory delle icone
     icons_dir = os.path.join(current_app.static_folder, 'icons')
-    
-    # Ottieni l'elenco dei file di icone
     icons = [f for f in os.listdir(icons_dir) if os.path.isfile(os.path.join(icons_dir, f))]
+    
+    # Estrai i numeri dalle icone es. 1.png → 1
+    icon_ids = sorted([int(f.split('.')[0]) for f in icons if f.endswith('.png')])
 
-    # Crea i link per accedere alle icone
-    icon_links = [url_for('static', filename=f'icons/{icon}', _external=True) for icon in icons]
+    # Genera i nuovi link nascosti
+    icon_links = [url_for('user.serve_user_icon', icon_id=icon_id, _external=True) for icon_id in icon_ids]
 
     return jsonify(icon_links)
 
-# Servire singole icone
-@users_bp.route('/icons/<filename>', methods=['GET'])
-def serve_icon(filename):
-    return send_from_directory(os.path.join(current_app.static_folder, 'icons'), filename)
 
+@users_bp.route('/icon/<int:icon_id>', methods=['GET'])
+def serve_user_icon(icon_id):
+    filename = f"{icon_id}.png"
+    icons_dir = os.path.join(current_app.static_folder, 'icons')
+    filepath = os.path.join(icons_dir, filename)
 
+    if not os.path.isfile(filepath):
+        return jsonify({"message": "Icon not found"}), 404
+
+    return send_from_directory(icons_dir, filename)
 
 
 
