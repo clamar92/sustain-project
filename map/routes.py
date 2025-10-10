@@ -253,4 +253,3 @@ def get_challenges():
         return jsonify(challenges_data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
