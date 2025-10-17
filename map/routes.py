@@ -11,6 +11,8 @@ import io
 from models import db, Cell
 import requests
 from geopy.geocoders import OpenCage
+from models import EnvironmentalData
+
 
 map_bp = Blueprint('map', __name__, url_prefix='/map')
 
@@ -251,5 +253,62 @@ def get_challenges():
             })
         
         return jsonify(challenges_data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+
+
+################################################################
+############################# GET DATA #########################
+################################################################
+
+@map_bp.route('/getEnvironmentalData', methods=['GET'])
+def get_environmental_data():
+    try:
+        # Recupera i parametri della richiesta
+        start_time = request.args.get('from')
+        end_time = request.args.get('to')
+
+        if not start_time or not end_time:
+            return jsonify({"error": "Missing 'from' or 'to' parameter"}), 400
+
+        # Converte le stringhe in oggetti datetime
+        from datetime import datetime
+        try:
+            start_dt = datetime.fromisoformat(start_time)
+            end_dt = datetime.fromisoformat(end_time)
+        except ValueError:
+            return jsonify({"error": "Invalid datetime format. Use ISO 8601 (e.g. 2025-10-10T12:00:00)"}), 400
+
+        # Query del database per intervallo di tempo
+        results = (EnvironmentalData.query
+                   .filter(EnvironmentalData.timestamp >= start_dt)
+                   .filter(EnvironmentalData.timestamp <= end_dt)
+                   .all())
+
+        # Serializza i risultati
+        data_list = []
+        for record in results:
+            data_list.append({
+                'id': record.id,
+                'user_id': record.user_id,
+                'battery_capacity': record.battery_capacity,
+                'battery_lifetime': record.battery_lifetime,
+                'temperature': record.temperature,
+                'humidity': record.humidity,
+                'co2_scd41': record.co2_scd41,
+                'co2_stc31c': record.co2_stc31c,
+                'voc': record.voc,
+                'pm1_0': record.pm1_0,
+                'pm2_5': record.pm2_5,
+                'pm4_0': record.pm4_0,
+                'pm10': record.pm10,
+                'timestamp': record.timestamp.isoformat()
+            })
+
+        return jsonify(data_list)
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
