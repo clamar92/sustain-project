@@ -5,7 +5,7 @@ from google.oauth2 import id_token
 from google.auth.transport import requests
 import os
 from decorators import login_required  # Importa il decoratore
-
+import random
 
 WEB_CLIENT_ID = "813739084992-fqmluqgaip3tq8t9fdtptu3c8cdetala.apps.googleusercontent.com"
 
@@ -42,7 +42,8 @@ def registration():
     # check icona
     try:
         if url_icon not in ICON_URLS:
-            return jsonify({"message": "Icon does not exist."}), 400
+            #return jsonify({"message": "Icon does not exist."}), 400
+            url_icon = random.choice(ICON_URLS)
     
     except:
         return jsonify({"message": "Icon does not exist."}), 400
@@ -352,7 +353,6 @@ def checkLogin():
 @login_required  # Proteggi questa route
 def changeIcon():
     url_icon = request.data.decode('utf-8')
-
     # Directory delle icone
     icons_dir = os.path.join(current_app.static_folder, 'icons')
     # Ottieni l'elenco dei file di icone
@@ -396,6 +396,81 @@ def changeIcon():
     
 
 
+################################################################
+################### FUNCTION AIR QUALITY #######################
+################################################################
+def evaluate_air_quality_from_values(
+    temperature_c, humidity_perc,
+    co2_ppm, pm1_0, pm2_5, pm4_0, pm10,
+    voc_ppm=None
+):
+    # HI (Humidity Index): HI = T - (0.55 - 0.0055*H)*(T - 14.5)
+    # Classi: <40 LOW, 40-45 MEDIUM, >=46 HIGH  (slide HI)
+    HI = temperature_c - (0.55 - 0.0055 * humidity_perc) * (temperature_c - 14.5)
+    if HI < 40:
+        level_hi = 0
+    elif HI <= 45:
+        level_hi = 1
+    else:
+        level_hi = 2
+
+    # Helper range
+    def classify(x, low_max, med_max):
+        if x <= low_max: return 0
+        if x <= med_max: return 1
+        return 2
+
+    # CO2 (ppm): 0-800 L, 801-1000 M, >1000 H
+    level_co2  = classify(co2_ppm, 800, 1000)
+
+    # PM2.5 (µg/m³): 0-35 L, 36-53 M, >=54 H
+    level_pm25 = classify(pm2_5, 35, 53)
+
+    # PM10 (µg/m³): 0-50 L, 51-75 M, >=76 H
+    level_pm10 = classify(pm10, 50, 75)
+
+    # PM1.0 / PM4.0: analogia con PM2.5 (slide)
+    level_pm1  = classify(pm1_0, 35, 53)
+    level_pm4  = classify(pm4_0, 35, 53)
+
+    # (Facoltativo) VOC: le slide non hanno un “medium” consistente; meglio non usarlo nell’aggregazione finché non chiarito.
+
+    # Regola aggregata: HIGH se c'è almeno un HIGH; altrimenti MEDIUM se c'è almeno un MEDIUM; altrimenti LOW
+    levels = [level_hi, level_co2, level_pm25, level_pm10, level_pm1, level_pm4]
+    if 2 in levels:
+        return 2
+    if 1 in levels:
+        return 1
+    return 0
+
+
+def compute_batch_air_quality(records):
+    worst = 0
+    for record in records:
+        cleaned = record.strip('[]')
+        vals = cleaned.split('#')
+
+        temperature = float(vals[2])
+        humidity    = int(vals[3])
+        co2_scd41   = int(vals[4])
+        voc         = int(vals[6])
+        pm1_0       = int(vals[7])
+        pm2_5       = int(vals[8])
+        pm4_0       = int(vals[9])
+        pm10        = int(vals[10])
+
+        level = evaluate_air_quality_from_values(
+            temperature, humidity,
+            co2_scd41, pm1_0, pm2_5, pm4_0, pm10,
+            voc_ppm=voc
+        )
+        worst = max(worst, level)
+    return worst
+
+
+
+
+
 
 
 
@@ -406,7 +481,8 @@ def changeIcon():
 #@login_required  # Proteggi la route con il login
 def sendNFCData():
     data = request.get_json()  # Otteniamo i dati JSON dal corpo della richiesta
-    
+
+
     if not data:
         return jsonify({"error": "No data provided"}), 400
     

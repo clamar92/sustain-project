@@ -35,6 +35,7 @@ class Cell(db.Model):
     bottom_right_lat = db.Column(db.Float, nullable=False)
     address = db.Column(db.String(400), default='')
     air_quality = db.Column(db.Integer, default=0, nullable=False)
+    last_aq_update = db.Column(db.DateTime, nullable=True, default=None)  # ⬅️ nuovo campo
 
 
 class EnvironmentalData(db.Model):
