@@ -2,3 +2,4 @@
 cache/
 __pychache__/
 key.txt.git-credentials
+.git-credentials
