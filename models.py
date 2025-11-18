@@ -41,6 +41,7 @@ class Cell(db.Model):
 class EnvironmentalData(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)  # Relazione con la tabella User
+    cell_id = db.Column(db.Integer, db.ForeignKey('cell.id'), nullable=False, index=True)
     battery_capacity = db.Column(db.Integer, nullable=False)  # Capacità residua della batteria (%)
     battery_lifetime = db.Column(db.Integer, nullable=False)  # Durata residua della batteria (minuti)
     temperature = db.Column(db.Float, nullable=False)  # Temperatura ambientale (°C)
@@ -56,4 +57,6 @@ class EnvironmentalData(db.Model):
     
     # Relazione con la tabella User
     user = db.relationship('User', backref=db.backref('environmental_data', lazy=True))
+    cell = db.relationship('Cell', backref=db.backref('environmental_data', lazy=True))
+
 

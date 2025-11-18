@@ -25,8 +25,6 @@ map_bp = Blueprint('map', __name__, url_prefix='/map')
 ox.settings.log_console = True
 ox.settings.use_cache = True
 
-# Inizializza il geocoder OpenCage
-geolocator = OpenCage(api_key='542212d332054c58b252c81c50a6c2d1')  # Sostituisci con la tua chiave API OpenCage
 
 # Funzione per calcolare la lunghezza di un grado di longitudine alla latitudine specifica
 def meters_to_degrees(meters, lat):
@@ -61,6 +59,10 @@ def format_address(location):
 
 @map_bp.route('/dividiMappa', methods=['GET'])
 def dividi_mappa():
+
+    # Inizializza il geocoder OpenCage
+    geolocator = OpenCage(api_key='5cc1979d410942cd9e870428b7ba82a1')  # Sostituisci con la tua chiave API OpenCage
+
     city = request.args.get('city', 'Cagliari, Italy')
     cell_size_meters = int(request.args.get('cell', 300))
     save_variable = bool(request.args.get('save', 0))
@@ -87,7 +89,7 @@ def dividi_mappa():
     # Filtra i rettangoli che hanno almeno il 20% dell'area in zone residenziali
     residential_union = residential_areas.unary_union
     grid['intersection_area_ratio'] = grid.geometry.apply(lambda x: area_of_intersection(x, residential_union))
-    grid = grid[grid['intersection_area_ratio'] >= 0.7]
+    grid = grid[grid['intersection_area_ratio'] >= 0.1]
 
     fig, ax = plt.subplots(figsize=(10, 10))
 
@@ -171,6 +173,7 @@ def get_all_cells():
             air_quality_status = 'LOW' if airquality == 0 else 'MEDIUM' if airquality == 1 else 'HIGH'
             
             cells_data.append({
+                'id': rect.id,
                 'topLeft': {
                     'latitude': rect.top_left_lat,
                     'longitude': rect.top_left_lon
@@ -195,45 +198,37 @@ def get_all_cells():
 @map_bp.route('/getChallenges', methods=['GET'])
 def get_challenges():
     try:
-        # Query the database for all Cell entries
-        #rectangles = Cell.query.all()
-        
-        # Controlla se ci sono almeno 4 rettangoli nel database
-        #if len(rectangles) < 4:
-        #    return jsonify({"error": "Not enough rectangles in the database"}), 500
-        
-        # Seleziona 4 rettangoli casuali
-        #selected_rectangles = random.sample(rectangles, 4)
+        # Recupera la cella con id 1029 (universita)
+        fixed_cell = Cell.query.get(1029)
+        if not fixed_cell:
+            return jsonify({"error": "Cell with id 1130 not found"}), 500
 
-        # Query the database for the specific Cell entries
-        rectangles = Cell.query.filter(Cell.id.in_([884, 893, 899, 906])).all()
+        # Recupera le 3 celle con air_quality più basso (escludendo la 857)
+        lowest_cells = Cell.query.filter(Cell.id != 857).order_by(Cell.air_quality.asc()).limit(3).all()
 
-        # Controlla se ci sono esattamente 4 rettangoli nel database
-        if len(rectangles) != 4:
-            return jsonify({"error": "The required rectangles are not available in the database"}), 500
+        # Controlla che ci siano almeno 3 celle oltre alla 857
+        if len(lowest_cells) < 3:
+            return jsonify({"error": "Not enough cells with low air quality"}), 500
 
-        # Seleziona i rettangoli specificati
-        selected_rectangles = rectangles
+        # Combina le celle selezionate
+        selected_rectangles = lowest_cells + [fixed_cell]
 
-        
         challenges_data = []
         for rect in selected_rectangles:
-
-            # simulazione valore air quality
-            airquality = random.randint(0, 2)
+            # Simulazione valore air quality (puoi usare rect.air_quality se vuoi reale)
+            airquality = rect.air_quality  # oppure random.randint(0, 2)
             air_quality_status = 'LOW' if airquality == 0 else 'MEDIUM' if airquality == 1 else 'HIGH'
 
-            #air_quality_status = 'LOW' if rect.air_quality == 0 else 'MEDIUM' if rect.air_quality == 1 else 'HIGH'
-
-            # Genera un numero casuale di punti da 100 a 500
+            # Genera un numero casuale di punti
             points = random.randint(50, 100)
 
-            # Utilizza le coordinate del centro del rettangolo come "waypoint"
+            # Calcola il centro del rettangolo
             waypoint_latitude = (rect.top_left_lat + rect.bottom_right_lat) / 2
             waypoint_longitude = (rect.top_left_lon + rect.bottom_right_lon) / 2
 
             challenges_data.append({
                 'cell': {
+                    'id': rect.id,
                     'topLeft': {
                         'latitude': rect.top_left_lat,
                         'longitude': rect.top_left_lon
@@ -251,10 +246,11 @@ def get_challenges():
                 },
                 'address': rect.address
             })
-        
+
         return jsonify(challenges_data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
 
 
 

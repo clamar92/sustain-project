@@ -1,6 +1,6 @@
 # users/routes.py
 from flask import Blueprint, request, jsonify, current_app, send_from_directory, url_for, session
-from models import db, User, EnvironmentalData
+from models import db, User, EnvironmentalData, Cell
 from google.oauth2 import id_token
 from google.auth.transport import requests
 import os
@@ -478,76 +478,74 @@ def compute_batch_air_quality(records):
 ######################### SEND DATA AIR ########################
 ################################################################
 @users_bp.route('/sendNFCData', methods=['POST'])
-#@login_required  # Proteggi la route con il login
+@login_required  # Proteggi la route con il login
 def sendNFCData():
-    data = request.get_json()  # Otteniamo i dati JSON dal corpo della richiesta
+    payload = request.get_json()
+    if not payload or not isinstance(payload, dict):
+        return jsonify({"error": "Invalid payload. Expected an object."}), 400
 
+    cell_id = payload.get('cell_id')
+    records = payload.get('data')
 
-    if not data:
-        return jsonify({"error": "No data provided"}), 400
-    
+    if cell_id is None:
+        return jsonify({"error": "Missing 'cell_id'"}), 400
+    if not isinstance(records, list) or not records:
+        return jsonify({"error": "Missing or empty 'data' list"}), 400
 
-    # Recuperiamo l'utente dalla sessione
-    if 'user_id' in session:
-    #if True == True:
-        user_id = session['user_id']
-        username = session['username']
-        #user_id = 10
-        #username = "claudioverdi"
+    # Verifica cella esistente
+    cell = Cell.query.get(cell_id)
+    if not cell:
+        return jsonify({"error": f"Cell {cell_id} not found"}), 404
 
-        existing_user = User.query.filter((User.id == user_id) | (User.username == username)).first()
-
-        if not existing_user:
-            return jsonify({"error": "User not found"}), 404
-
-
-        try:
-            # Iteriamo attraverso i record, che sono stringhe come: "[[[98#500#26.0#60#400#50#350#0#0#10#567]]]"
-            for record in data:
-                # Rimuoviamo le triple parentesi quadre all'inizio e alla fine della stringa
-                cleaned_record = record.strip('[]')
-                # Dividiamo i valori della stringa usando il simbolo '#'
-                values = cleaned_record.split('#')
-
-                # Convertiamo i valori nella forma corretta
-                battery_capacity = int(values[0])
-                battery_lifetime = int(values[1])
-                temperature = float(values[2])
-                humidity = int(values[3])
-                co2_scd41 = int(values[4])
-                co2_stc31c = int(values[5])
-                voc = int(values[6])
-                pm1_0 = int(values[7])
-                pm2_5 = int(values[8])
-                pm4_0 = int(values[9])
-                pm10 = int(values[10])
-
-                # Creiamo un nuovo oggetto EnvironmentalData
-                environmental_data = EnvironmentalData(
-                    user_id=user_id,
-                    battery_capacity=battery_capacity,
-                    battery_lifetime=battery_lifetime,
-                    temperature=temperature,
-                    humidity=humidity,
-                    co2_scd41=co2_scd41,
-                    co2_stc31c=co2_stc31c,
-                    voc=voc,
-                    pm1_0=pm1_0,
-                    pm2_5=pm2_5,
-                    pm4_0=pm4_0,
-                    pm10=pm10
-                )
-
-                # Aggiungiamo l'oggetto al database
-                db.session.add(environmental_data)
-
-            # Commit per salvare tutti i record
-            db.session.commit()
-            return jsonify({"message": "Data saved successfully"}), 200
-
-        except Exception as e:
-            db.session.rollback()  # Effettuiamo un rollback in caso di errore
-            return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-
-    else:
+    # Utente dalla sessione
+    user_id = session.get('user_id')
+    username = session.get('username')
+    if not user_id or not username:
         return jsonify({"error": "User not logged in"}), 401
+
+    existing_user = User.query.filter(
+        (User.id == user_id) | (User.username == username)
+    ).first()
+    if not existing_user:
+        return jsonify({"error": "User not found"}), 404
+
+    try:
+        for record in records:
+            # Esempio record: "[98#500#26.0#60#400#50#350#0#0#10#567]"
+            cleaned = record.strip('[]')
+            vals = cleaned.split('#')
+
+            battery_capacity = int(vals[0])
+            battery_lifetime = int(vals[1])
+            temperature      = float(vals[2])
+            humidity         = int(vals[3])
+            co2_scd41        = int(vals[4])
+            co2_stc31c       = int(vals[5])
+            voc              = int(vals[6])
+            pm1_0            = int(vals[7])
+            pm2_5            = int(vals[8])
+            pm4_0            = int(vals[9])
+            pm10             = int(vals[10])
+
+            db.session.add(EnvironmentalData(
+                user_id=user_id,
+                cell_id=cell_id,  # ⬅️ collega la misura alla cella
+                battery_capacity=battery_capacity,
+                battery_lifetime=battery_lifetime,
+                temperature=temperature,
+                humidity=humidity,
+                co2_scd41=co2_scd41,
+                co2_stc31c=co2_stc31c,
+                voc=voc,
+                pm1_0=pm1_0,
+                pm2_5=pm2_5,
+                pm4_0=pm4_0,
+                pm10=pm10
+            ))
+
+        db.session.commit()
+        return jsonify({"message": "Data saved successfully"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
