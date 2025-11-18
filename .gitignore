@@ -1,5 +1,5 @@
 .venv/
 cache/
 __pychache__/
-key.txt.git-credentials
+key.txt
 .git-credentials
