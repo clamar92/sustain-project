@@ -6,6 +6,10 @@ from google.auth.transport import requests
 import os
 from decorators import login_required  # Importa il decoratore
 import random
+from statistics import median
+from datetime import datetime
+from map.routes import get_challenge_cells, compute_challenge_points_for_cell
+
 
 WEB_CLIENT_ID = "813739084992-fqmluqgaip3tq8t9fdtptu3c8cdetala.apps.googleusercontent.com"
 
@@ -407,9 +411,9 @@ def evaluate_air_quality_from_values(
     # HI (Humidity Index): HI = T - (0.55 - 0.0055*H)*(T - 14.5)
     # Classi: <40 LOW, 40-45 MEDIUM, >=46 HIGH  (slide HI)
     HI = temperature_c - (0.55 - 0.0055 * humidity_perc) * (temperature_c - 14.5)
-    if HI < 40:
+    if HI < 70: # bypassa umidità
         level_hi = 0
-    elif HI <= 45:
+    elif HI <= 65:
         level_hi = 1
     else:
         level_hi = 2
@@ -444,8 +448,14 @@ def evaluate_air_quality_from_values(
     return 0
 
 
+
 def compute_batch_air_quality(records):
-    worst = 0
+    """
+    records: lista di stringhe tipo "[98#500#26.0#60#400#50#350#0#0#10#567]"
+    Ritorna la mediana dei livelli di qualità (0,1,2) calcolati per ogni record.
+    """
+    levels = []
+
     for record in records:
         cleaned = record.strip('[]')
         vals = cleaned.split('#')
@@ -464,9 +474,23 @@ def compute_batch_air_quality(records):
             co2_scd41, pm1_0, pm2_5, pm4_0, pm10,
             voc_ppm=voc
         )
-        worst = max(worst, level)
-    return worst
+        levels.append(level)
 
+    if not levels:
+        return 0  # fallback ragionevole
+
+    # Mediana dei livelli (0,1,2)
+    return int(median(levels))
+
+
+
+def is_challenge_cell(cell_id: int) -> bool:
+    """
+    True se la cella è una delle celle challenge correnti,
+    cioè tra quelle con air_quality più bassa.
+    """
+    challenge_cells = get_challenge_cells()
+    return any(c.id == cell_id for c in challenge_cells)
 
 
 
@@ -510,6 +534,18 @@ def sendNFCData():
         return jsonify({"error": "User not found"}), 404
 
     try:
+        # 0) Determina se la cella è una challenge
+        challenge = is_challenge_cell(cell_id)
+
+        # 1) Calcola i punti per singola misurazione
+        if challenge:
+            points_per_measurement = compute_challenge_points_for_cell(cell)
+        else:
+            points_per_measurement = 10  # cella normale
+
+        total_points = points_per_measurement
+
+        # 2) salva tutti i record nel DB
         for record in records:
             # Esempio record: "[98#500#26.0#60#400#50#350#0#0#10#567]"
             cleaned = record.strip('[]')
@@ -529,7 +565,7 @@ def sendNFCData():
 
             db.session.add(EnvironmentalData(
                 user_id=user_id,
-                cell_id=cell_id,  # ⬅️ collega la misura alla cella
+                cell_id=cell_id,
                 battery_capacity=battery_capacity,
                 battery_lifetime=battery_lifetime,
                 temperature=temperature,
@@ -543,9 +579,29 @@ def sendNFCData():
                 pm10=pm10
             ))
 
+        # 3) calcola la qualità dell'aria a partire dai record ricevuti (mediana)
+        air_quality_level = compute_batch_air_quality(records)
+
+        # 4) aggiorna la cella con il valore e il timestamp
+        cell.air_quality = air_quality_level
+        cell.last_aq_update = datetime.now()
+
+        # 5) aggiorna il punteggio dell'utente
+        existing_user.punteggio = (existing_user.punteggio or 0) + total_points
+
+        # 6) commit unico
         db.session.commit()
-        return jsonify({"message": "Data saved successfully"}), 200
+
+        return jsonify({
+            "message": "Data saved successfully",
+            "air_quality": air_quality_level,
+            "challenge_cell": challenge,
+            "points_per_measurement": points_per_measurement,
+            "points_gained": total_points,
+            "total_points": existing_user.punteggio
+        }), 200
 
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": f"An error occurred: {str(e)}"}), 500
+

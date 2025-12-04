@@ -5,16 +5,75 @@ import contextily as ctx
 import geopandas as gpd
 from shapely.geometry import box
 import numpy as np
-import random
 from flask import request, Response, Blueprint, jsonify
 import io
-from models import db, Cell
+from datetime import datetime, timedelta
+from models import db, Cell, EnvironmentalData
 import requests
 from geopy.geocoders import OpenCage
-from models import EnvironmentalData
+
 
 
 map_bp = Blueprint('map', __name__, url_prefix='/map')
+
+
+CHALLENGE_LIMIT = 4  # quante celle sono "challenge"
+
+
+def get_challenge_cells():
+    """
+    Ritorna esattamente le stesse celle che usi in /getChallenges:
+    - la cella fissa 1029 (se esiste)
+    - le 3 celle con air_quality più basso, ESCLUDENDO la 1029
+    """
+    fixed_cell = Cell.query.get(1029)
+
+    # quante celle restano da prendere oltre alla fissa
+    extra_needed = CHALLENGE_LIMIT - (1 if fixed_cell is not None else 0)
+    if extra_needed < 0:
+        extra_needed = 0
+
+    lowest_cells = (Cell.query
+                        .filter(Cell.id != 1029)
+                        .order_by(Cell.air_quality.asc())
+                        .limit(extra_needed)
+                        .all())
+
+    challenge_cells = list(lowest_cells)
+    if fixed_cell is not None and fixed_cell not in challenge_cells:
+        challenge_cells.append(fixed_cell)
+
+    return challenge_cells
+
+
+def compute_challenge_points_for_cell(cell: Cell) -> int:
+    """
+    Punti per MISURAZIONE in una cella challenge: tra 15 e 30.
+
+    - last_aq_update None       -> 30 punti (nessun dato, molto utile)
+    - last_aq_update >= 7 gg fa -> 30 punti (dato vecchio)
+    - last_aq_update = ora      -> 15 punti (dato molto recente)
+    - tra 0 e 7 gg              -> interpolazione lineare tra 15 e 30
+    """
+    now = datetime.now()
+
+    if cell.last_aq_update is None:
+        return 30
+
+    age = now - cell.last_aq_update
+    week = timedelta(days=7)
+
+    # giusto in caso sia "nel futuro"
+    if age <= timedelta(seconds=0):
+        return 15
+
+    if age >= week:
+        return 30
+
+    frac = age.total_seconds() / week.total_seconds()  # 0..1
+    points = 15 + frac * (30 - 15)
+    return int(round(points))
+
 
 
 ################################################################
@@ -167,10 +226,12 @@ def get_all_cells():
         # Serialize the data
         cells_data = []
         for rect in rectangles:
-            #air_quality_status = 'LOW' if rect.air_quality == 0 else 'MEDIUM' if rect.air_quality == 1 else 'HIGH'
-            # simulazione valore air quality
-            airquality = random.randint(0, 2)
-            air_quality_status = 'LOW' if airquality == 0 else 'MEDIUM' if airquality == 1 else 'HIGH'
+            airquality = rect.air_quality or 0
+            air_quality_status = (
+                'LOW' if airquality == 0 else
+                'MEDIUM' if airquality == 1 else
+                'HIGH'
+            )
             
             cells_data.append({
                 'id': rect.id,
@@ -195,32 +256,26 @@ def get_all_cells():
 ################################################################
 ########################## GET CHALLENGE #######################
 ################################################################
+
 @map_bp.route('/getChallenges', methods=['GET'])
 def get_challenges():
     try:
-        # Recupera la cella con id 1029 (universita)
-        fixed_cell = Cell.query.get(1029)
-        if not fixed_cell:
-            return jsonify({"error": "Cell with id 1130 not found"}), 500
+        challenge_cells = get_challenge_cells()
 
-        # Recupera le 3 celle con air_quality più basso (escludendo la 857)
-        lowest_cells = Cell.query.filter(Cell.id != 857).order_by(Cell.air_quality.asc()).limit(3).all()
-
-        # Controlla che ci siano almeno 3 celle oltre alla 857
-        if len(lowest_cells) < 3:
-            return jsonify({"error": "Not enough cells with low air quality"}), 500
-
-        # Combina le celle selezionate
-        selected_rectangles = lowest_cells + [fixed_cell]
+        if len(challenge_cells) < 1:
+            return jsonify({"error": "Not enough cells for challenges"}), 500
 
         challenges_data = []
-        for rect in selected_rectangles:
-            # Simulazione valore air quality (puoi usare rect.air_quality se vuoi reale)
-            airquality = rect.air_quality  # oppure random.randint(0, 2)
-            air_quality_status = 'LOW' if airquality == 0 else 'MEDIUM' if airquality == 1 else 'HIGH'
+        for rect in challenge_cells:
+            airquality = rect.air_quality or 0
+            air_quality_status = (
+                'LOW' if airquality == 0 else
+                'MEDIUM' if airquality == 1 else
+                'HIGH'
+            )
 
-            # Genera un numero casuale di punti
-            points = random.randint(50, 100)
+            # Stessa logica dei punti che userà l'utente
+            points = compute_challenge_points_for_cell(rect)
 
             # Calcola il centro del rettangolo
             waypoint_latitude = (rect.top_left_lat + rect.bottom_right_lat) / 2
